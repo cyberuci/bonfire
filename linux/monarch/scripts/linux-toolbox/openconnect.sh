@@ -1,21 +1,18 @@
 #!/bin/bash
 
-# Assumes `ocserv` is already installed
-# or i guess TODO
-
-# Parameters? kinda
 CERTIFICATE_AUTHORITY=""
 ORGANIZATION=""
-PORT=""
-NETWORK=""
-DNS=""
+PORT=""                 # 443
+EXTERNAL_RANGE=""       # 10.10.0.0/24
+INTERNAL_RANGE=""       # 192.168.220.0/24
+DNS=""                  # 1.1.1.1
 
 comment_out() {
     sed -i -E "s/^[[:space:]]*#?[[:space:]]*($1[[:space:]]*=.*)$/#\1/" $CONF
 }
 
 # check that variables are non empty
-if [ -z "$CERTIFICATE_AUTHORITY" -o -z "$ORGANIZATION" -o -z "$PORT" -o -z "$NETWORK" -o -z "$DNS" ]
+if [ -z "$CERTIFICATE_AUTHORITY" -o -z "$ORGANIZATION" -o -z "$PORT" -o -z "$EXTERNAL_RANGE" -o -z "$DNS" ]
 then
 	echo "ERROR: Fill in variables first"
 	exit 1
@@ -81,15 +78,15 @@ sed -i -e "/^[[:space:]]*udp-port =/ s/= .*/= $PORT/" $CONF
 # subnet
 comment_out "ipv4-network"
 comment_out "ipv4-netmask"
-echo "ipv4-network = $NETWORK/24" >> $CONF
+echo "ipv4-network = $EXTERNAL_RANGE" >> $CONF
 
 # dns (not sure if necessary)
 sed -i -e "/^[[:space:]]*dns =/ s/= .*/= $DNS/" $CONF
 
 # routes (copied from above)
 comment_out "route"
-echo "route = $NETWORK/24" >> $CONF
-echo "route = 192.168.220.0/24" >> $CONF
+echo "route = $EXTERNAL_RANGE" >> $CONF
+echo "route = $INTERNAL_RANGE" >> $CONF
 
 # start
 ocserv -c /etc/ocserv/ocserv.conf
