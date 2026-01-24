@@ -1,0 +1,108 @@
+---
+# Configure server (non-interactive)
+- name: Configure OpenVPN server
+  hosts: openvpn_server
+  become: true
+  tasks:
+    - name: Run server setup script
+      command: /root/ovpn_server.sh
+      args:
+        creates: /etc/openvpn/ta.key
+
+# Run client config script (non-interactive)
+- name: Configure OpenVPN on all clients
+  hosts: openvpn_clients
+  become: true
+  vars:
+    server_ip: "{{ hostvars[server_host].ansible_host }}"
+  tasks:
+    - name: Run client config script with SERVER_IP env var
+      command: /root/ovpn_client.sh
+      environment:
+        SERVER_IP: "{{ server_ip }}"
+      args:
+        creates: /etc/openvpn/client.conf
+
+# Generate client certs on server (non-interactive)
+- name: Generate client certs on server
+  hosts: openvpn_server
+  become: true
+  tasks:
+    - name: Generate cert/key for each client
+      command: /root/ovpn_gen_clients_for_ansible.sh
+      environment:
+        CLIENT_NAME: "{{ item }}"
+        CLIENT_IP: "{{ hostvars[item].ansible_host }}"
+      loop: "{{ groups['openvpn_clients'] }}"
+
+# Fetch certs/keys from server to controller
+- name: Fetch VPN materials from server to controller
+  hosts: openvpn_server
+  become: true
+  vars:
+    local_stage: "./vpn_stage"
+    easyrsa_dir: "/etc/openvpn/easy-rsa"
+  tasks:
+    - name: Create staging dir on controller
+      delegate_to: localhost
+      become: false
+      file:
+        path: "{{ local_stage }}"
+        state: directory
+
+    - name: Fetch CA cert
+      fetch:
+        src: "{{ easyrsa_dir }}/pki/ca.crt"
+        dest: "{{ local_stage }}/ca.crt"
+        flat: true
+
+    - name: Fetch TA key
+      fetch:
+        src: "/etc/openvpn/ta.key"
+        dest: "{{ local_stage }}/ta.key"
+        flat: true
+
+    - name: Fetch each client's cert
+      fetch:
+        src: "{{ easyrsa_dir }}/pki/issued/{{ item }}.crt"
+        dest: "{{ local_stage }}/{{ item }}.crt"
+        flat: true
+      loop: "{{ groups['openvpn_clients'] }}"
+
+    - name: Fetch each client's key
+      fetch:
+        src: "{{ easyrsa_dir }}/pki/private/{{ item }}.key"
+        dest: "{{ local_stage }}/{{ item }}.key"
+        flat: true
+      loop: "{{ groups['openvpn_clients'] }}"
+
+# Copy certs/keys to clients
+- name: Distribute VPN materials to clients
+  hosts: openvpn_clients
+  become: true
+  vars:
+    local_stage: "./vpn_stage"
+  tasks:
+    - name: Copy CA cert
+      copy:
+        src: "{{ local_stage }}/ca.crt"
+        dest: /etc/openvpn/ca.crt
+        mode: "0644"
+
+    - name: Copy TA key
+      copy:
+        src: "{{ local_stage }}/ta.key"
+        dest: /etc/openvpn/ta.key
+        mode: "0600"
+
+    - name: Copy client cert
+      copy:
+        src: "{{ local_stage }}/{{ inventory_hostname }}.crt"
+        dest: "/etc/openvpn/{{ inventory_hostname }}.crt"
+        mode: "0644"
+
+    - name: Copy client key
+      copy:
+        src: "{{ local_stage }}/{{ inventory_hostname }}.key"
+        dest: "/etc/openvpn/{{ inventory_hostname }}.key"
+        mode: "0600"
