@@ -43,6 +43,8 @@ if (!($domainRole -eq 4 -or $domainRole -eq 5)) {
             
         }
     }
+
+    Write-Host "Password rotation complete. Output saved to $outputFile" -ForegroundColor Cyan
 }
 else {
     $hostname = $env:computername

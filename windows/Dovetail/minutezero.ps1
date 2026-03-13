@@ -1,20 +1,43 @@
 # Local Subnets (X.X.X.0/24) (keep blank if none)
-$localsubnet1 = ""
-$localsubnet2 = ""
+$localSubnets = ""
+$force = $False
 
-$blockedPorts = 
+$blockedPorts = ""
 
 $hostname = $env:computername
 
+$activeSubnets = @()
+
 # Validate Input
-if ($localsubnet1 -notmatch '^(\d{1,3}\.){3}0/(\d{1,2})$') {
-    Write-Host("[$($hostname)] Invalid subnet 1. Enter in the form X.X.X.0/24") -ForegroundColor Red
+if (![string]::IsNullOrWhiteSpace($localSubnets)) {
+    $parsedSubnets = $localSubnets -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+    
+    foreach ($subnet in $parsedSubnets) {
+        if ($subnet -notmatch '^(\d{1,3}\.){3}0/(\d{1,2})$') {
+            Write-Host("[$($hostname)] Invalid subnet: '$subnet'. Enter in the form X.X.X.0/24") -ForegroundColor Red
+            return
+        }
+        $activeSubnets += $subnet
+    }
+}
+
+if ($activeSubnets.Count -eq 0) {
+    Write-Host("[$($hostname)] No valid local subnets provided.") -ForegroundColor Red
     return
 }
 
-if ($localsubnet2 -ne "" -and $localsubnet2 -notmatch '^(\d{1,3}\.){3}0/(\d{1,2})$') {
-    Write-Host("[$($hostname)] Invalid subnet 2. Enter in the form X.X.X.0/24") -ForegroundColor Red
+if ($blockedPorts -eq "") {
+    Write-Host("[$($hostname)] No blocked ports specified.") -ForegroundColor Red
     return
+}
+
+if (Test-Path -Path "C:\Users\Administrator\Documents\transcript_minutezero.txt") {
+    if (-not $force) {
+        Write-Host("[$($hostname)] Minutezero already run. Not running.") -ForegroundColor Cyan
+        return
+    } 
+    
+    Write-Host("[$($hostname)] Minutezero already run. Forcing rerun") -ForegroundColor Cyan
 }
 
 $Error.Clear()
@@ -63,12 +86,12 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
         foreach ($member in $members) {
             try {
                 Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false
-                Write-Host "[$($hostname)] Removed $($member.SamAccountName) from $group."
-                Write-Output "[$($hostname)] Removed $($member.SamAccountName) from $group."
+                Write-Host "[$($hostname)] $($member.SamAccountName) in $group."
+                Write-Output "[$($hostname)] $($member.SamAccountName) in $group."
                 Add-Content -Path $outputFilePath -Value "Add-ADGroupMember -Identity '$($group)' -Members '$($member.SamAccountName)';"
             }
             catch {
-                Write-Host "[$($hostname)] Failed to remove group member $($member.SamAccountName) from $($group): $_" -ForegroundColor Red
+                Write-Host "[$($hostname)] Failed to enumerate group member $($member.SamAccountName) from $($group): $_" -ForegroundColor Red
             }
         }
     }
@@ -122,21 +145,17 @@ netsh a s a firewallpolicy "allowinbound,blockoutbound"
 netsh a f de r n=all 
 
 netsh a f a r n="RDP" dir=in a=allow prot=TCP localport=3389 
-
-netsh a f a r n="Local_TCP_In" dir=in a=allow prot=TCP remoteip=$localsubnet1 
-netsh a f a r n="Local_UDP_In" dir=in a=allow prot=UDP remoteip=$localsubnet1 
 netsh a f a r n="ICMP_In" dir=in a=allow prot=ICMPv4
-netsh a f a r n="Local_TCP_Out" dir=out a=allow prot=TCP remoteip=$localsubnet1 
-netsh a f a r n="Local_UDP_Out" dir=out a=allow prot=UDP remoteip=$localsubnet1 
 netsh a f a r n="ICMP_Out" dir=out a=allow prot=ICMPv4
-Write-Host "[$($hostname)] Localsubnet1: $($localsubnet1)" -ForegroundColor Cyan
 
-if ($localsubnet2 -ne "") {
-    netsh a f a r n="Local2_TCP_In" dir=in a=allow prot=TCP remoteip=$localsubnet2 
-    netsh a f a r n="Local2_UDP_In" dir=in a=allow prot=UDP remoteip=$localsubnet2 
-    netsh a f a r n="Local2_TCP_Out" dir=out a=allow prot=TCP remoteip=$localsubnet2 
-    netsh a f a r n="Local2_UDP_Out" dir=out a=allow prot=UDP remoteip=$localsubnet2 
-    Write-Host "[$($hostname)] Localsubnet2: $($localsubnet2)" -ForegroundColor Cyan
+$subnetIndex = 1
+foreach ($subnet in $activeSubnets) {
+    netsh a f a r n="Local${subnetIndex}_TCP_In" dir=in a=allow prot=TCP remoteip=$subnet 
+    netsh a f a r n="Local${subnetIndex}_UDP_In" dir=in a=allow prot=UDP remoteip=$subnet 
+    netsh a f a r n="Local${subnetIndex}_TCP_Out" dir=out a=allow prot=TCP remoteip=$subnet 
+    netsh a f a r n="Local${subnetIndex}_UDP_Out" dir=out a=allow prot=UDP remoteip=$subnet 
+    Write-Host "[$($hostname)] Localsubnet${subnetIndex}: $($subnet)" -ForegroundColor Cyan
+    $subnetIndex++
 }
 
 # DC Firewall
@@ -146,43 +165,35 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
 }
 
 # Initial Blocks
-if ($localsubnet2 -eq "") {
-    $s = $localsubnet1.Split('.')
+$sortedSubnets = @($activeSubnets | Sort-Object { [version]($_ -replace '/\d+$', '') })
+
+$blockMsg = @()
+
+for ($i = 0; $i -lt $sortedSubnets.Count; $i++) {
+    $s = $sortedSubnets[$i].Split('.')
     $prev = "$($s[0]).$($s[1]).$([int]$s[2] - 1).255"
     $next = "$($s[0]).$($s[1]).$([int]$s[2] + 1).1"
 
-    netsh a f a r n="Block_Below" dir=in a=block prot=TCP remoteip=0.0.0.0-$($prev) localport=$($blockedPorts) > $null
-    netsh a f a r n="Block_Above" dir=in a=block prot=TCP remoteip=$($next)-255.255.255.255 localport=$($blockedPorts) > $null
-    Write-Host "[$($hostname)] Blocks: (0.0.0.0 - $($prev)), ($($next) - 255.255.255.255)" -ForegroundColor Cyan
-
-} else {
-    $s1 = $localsubnet1.Split('.')
-    $s2 = $localsubnet2.Split('.')
-
-    if (
-        ($s1[0] -lt $s2[0]) -or
-        ($s1[0] -eq $s2[0] -and $s1[1] -lt $s2[1]) -or
-        ($s1[0] -eq $s2[0] -and $s1[1] -eq $s2[1] -and $s1[2] -lt $s2[2]) -or
-        ($s1[0] -eq $s2[0] -and $s1[1] -eq $s2[1] -and $s1[2] -eq $s2[2] -and $s1[3] -le $s2[3])
-    ) {
-        # Localsubnet1 is lower
-        $prev1 = "$($s1[0]).$($s1[1]).$([int]$s1[2] - 1).255"
-        $next1 = "$($s1[0]).$($s1[1]).$([int]$s1[2] + 1).1"
-        $prev2 = "$($s2[0]).$($s2[1]).$([int]$s2[2] - 1).255"
-        $next2 = "$($s2[0]).$($s2[1]).$([int]$s2[2] + 1).1"
-    } else {
-        # Localsubet2 is lower
-        $prev2 = "$($s1[0]).$($s1[1]).$([int]$s1[2] - 1).255"
-        $next2 = "$($s1[0]).$($s1[1]).$([int]$s1[2] + 1).1"
-        $prev1 = "$($s2[0]).$($s2[1]).$([int]$s2[2] - 1).255"
-        $next1 = "$($s2[0]).$($s2[1]).$([int]$s2[2] + 1).1"
+    if ($i -eq 0) {
+        netsh a f a r n="Block_Below" dir=in a=block prot=TCP remoteip="0.0.0.0-$prev" localport=$blockedPorts > $null
+        $blockMsg += "(0.0.0.0 - $prev)"
+    } 
+    
+    if ($i -gt 0) {
+        $prev_s = $sortedSubnets[$i-1].Split('.')
+        $prev_next = "$($prev_s[0]).$($prev_s[1]).$([int]$prev_s[2] + 1).1"
+        
+        netsh a f a r n="Block_Between_$i" dir=in a=block prot=TCP remoteip="$prev_next-$prev" localport=$blockedPorts > $null
+        $blockMsg += "($prev_next - $prev)"
     }
 
-    netsh a f a r n="Block_Below" dir=in a=block prot=TCP remoteip=0.0.0.0-$($prev1) localport=$($blockedPorts) 
-    netsh a f a r n="Block_Between" dir=in a=block prot=TCP remoteip=$($next1)-$($prev2) localport=$($blockedPorts) 
-    netsh a f a r n="Block_Above" dir=in a=block prot=TCP remoteip=$($next2)-255.255.255.255 localport=$($blockedPorts) 
-    Write-Host "[$($hostname)] Blocks: (0.0.0.0 - $($prev1)), ($($next1) - $($prev2)), ($($next2) - 255.255.255.255)" -ForegroundColor Cyan
+    if ($i -eq ($sortedSubnets.Count - 1)) {
+        netsh a f a r n="Block_Above" dir=in a=block prot=TCP remoteip="$next-255.255.255.255" localport=$blockedPorts > $null
+        $blockMsg += "($next - 255.255.255.255)"
+    }
 }
+
+Write-Host "[$($hostname)] Blocks: $($blockMsg -join ', ')" -ForegroundColor Cyan
 
 # Logging
 netsh a s a logging allowedconnections enable
@@ -260,6 +271,13 @@ try {
     Write-Host "[$($hostname)] PTH Mitigation complete" -ForegroundColor Green
 } catch {
     Write-Host "[$($hostname)] Failed to apply PTH mitigation $_" -ForegroundColor Red
+}
+
+try {
+    reg add "HKLM\System\CurrentControlSet\Control\Lsa" /v DsrmAdminLogonBehavior /t REG_DWORD /d 0 /f 
+    Write-Host "[$($hostname)] DSRM logon behavior set to 0" -ForegroundColor Green
+} catch {
+    Write-Host "[$($hostname)] Failed to set DSRM logon behavior: $_" -ForegroundColor Red
 }
 
 try {

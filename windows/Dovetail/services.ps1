@@ -1,4 +1,14 @@
+$force = $False
 $hostname = $env:computername
+
+if (Test-Path -Path "C:\Users\Administrator\Documents\transcript_services.txt") {
+    if (-not $force) {
+        Write-Host("[$($hostname)] Services already run. Not running.") -ForegroundColor Cyan
+        return
+    } 
+    
+    Write-Host("[$($hostname)] Services already run. Forcing rerun") -ForegroundColor Cyan
+}
 
 $Error.Clear()
 $ErrorActionPreference = "Continue"
@@ -97,8 +107,8 @@ $appPools = Get-ChildItem IIS:\AppPools -ErrorAction SilentlyContinue
 foreach ($pool in $appPools) {
     $currentIdentity = $pool.processModel.identityType
     if ($currentIdentity -ne "ApplicationPoolIdentity") {
-        Write-Host "[$($hostname)] Setting ApplicationPoolIdentity for pool: $($pool.Name) (Current: $currentIdentity)"
-        Set-ItemProperty "IIS:\AppPools\$($pool.Name)" -Name processModel.identityType -Value "ApplicationPoolIdentity"
+        Write-Host "[$($hostname)] ApplicationPoolIdentity for pool: $($pool.Name) (Current: $currentIdentity)"
+        # Set-ItemProperty "IIS:\AppPools\$($pool.Name)" -Name processModel.identityType -Value "ApplicationPoolIdentity"
     }
     else {
         Write-Host "[$($hostname)] Pool $($pool.Name) already uses ApplicationPoolIdentity."
