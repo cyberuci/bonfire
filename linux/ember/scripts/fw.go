@@ -246,18 +246,34 @@ func main() {
 	stdinInfo, _ := os.Stdin.Stat()
 	isPiped := (stdinInfo.Mode() & os.ModeCharDevice) == 0
 
-	if isPiped && len(filePaths) == 0 {
+	// Over SSH, stdin is always a pipe even when empty. Peek to confirm data is available.
+	stdinHasData := false
+	var stdinReader io.Reader
+	if isPiped {
+		buf := make([]byte, 1)
+		n, _ := os.Stdin.Read(buf)
+		if n > 0 {
+			stdinHasData = true
+			stdinReader = io.MultiReader(strings.NewReader(string(buf[:n])), os.Stdin)
+		}
+	}
+
+	if stdinHasData && len(filePaths) == 0 {
 		inputs = append(inputs, struct {
 			r    io.Reader
 			name string
-		}{os.Stdin, "stdin"})
+		}{stdinReader, "stdin"})
 	} else if len(filePaths) > 0 {
 		for _, path := range filePaths {
 			if path == "-" {
+				r := io.Reader(os.Stdin)
+				if stdinReader != nil {
+					r = stdinReader
+				}
 				inputs = append(inputs, struct {
 					r    io.Reader
 					name string
-				}{os.Stdin, "stdin"})
+				}{r, "stdin"})
 			} else {
 				f, err := os.Open(path)
 				if err != nil {
@@ -292,18 +308,15 @@ func main() {
 
 		if !found {
 			cmd := exec.Command("journalctl", "-k", "--no-pager")
-			if err := cmd.Start(); err == nil {
-				path, err := exec.LookPath("journalctl")
-				if err == nil {
-					fmt.Fprintf(os.Stderr, "Reading from journalctl (%s)\n", path)
-					stdout, _ := cmd.StdoutPipe()
-					if err := cmd.Start(); err == nil {
-						inputs = append(inputs, struct {
-							r    io.Reader
-							name string
-						}{stdout, "journalctl"})
-						found = true
-					}
+			stdout, err := cmd.StdoutPipe()
+			if err == nil {
+				if err := cmd.Start(); err == nil {
+					fmt.Fprintln(os.Stderr, "Reading from journalctl")
+					inputs = append(inputs, struct {
+						r    io.Reader
+						name string
+					}{stdout, "journalctl"})
+					found = true
 				}
 			}
 		}
