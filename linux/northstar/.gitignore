@@ -1,0 +1,7 @@
+node_modules/
+northstar
+ui/.tanstack/
+*.db
+bin/
+data/
+ember.toml
