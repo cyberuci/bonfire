@@ -1,0 +1,48 @@
+---
+# Configure server (non-interactive)
+- name: Run OpenVPN deploy script on server
+  hosts: openvpn_server
+  become: true
+  tasks:
+    - name: Run server setup script
+      command: /root/ovpn_deploy.sh
+      args:
+        creates: /etc/openvpn/ta.key
+      environment:
+        SERVER_IP: "{{ ansible_host }}"
+
+# Fetch certs/keys from server to controller
+- name: Fetch VPN materials from server to controller
+  hosts: openvpn_server
+  become: true
+  vars:
+    local_stage: "./vpn_stage"
+    ovpn_dir: "/etc/openvpn"
+    client_name: "uclient"
+  tasks:
+    - name: Create staging dir on controller
+      delegate_to: localhost
+      become: false
+      file:
+        path: "{{ local_stage }}"
+        state: directory
+
+    - name: Fetch unified client file
+      fetch:
+        src: "{{ ovpn_dir  }}/{{ client_name }}.ovpn"
+        dest: "{{ local_stage }}/{{ client_name }}.ovpn"
+        flat: true
+
+# Copy certs/keys to clients
+- name: Distribute VPN materials to clients
+  hosts: openvpn_clients
+  become: true
+  vars:
+    local_stage: "./vpn_stage"
+    client_name: "uclient"
+  tasks:
+    - name: Copy unified client file
+      copy:
+        src: "{{ local_stage }}/{{ client_name }}.ovpn"
+        dest: /etc/openvpn/{{ client_name }}.ovpn
+        mode: "0644"
