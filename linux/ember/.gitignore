@@ -8,3 +8,4 @@ ember.toml
 ember.log
 downloads/
 passwords.db
+scripts/linux-toolbox/users.conf
