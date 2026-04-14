@@ -8,23 +8,7 @@ A defensive cybersecurity competition where a team of 6-8 defends a network of 1
 
 ## Tools Available via MCP (Hypernova)
 
-Hypernova is the MCP server that gives you access to both Northstar and Ember. All tools below are exposed through Hypernova.
-
-### Northstar (Dashboard)
-A Go + React web app that tracks the competition infrastructure. Query it to understand the network before touching anything.
-
-**What it knows:**
-- **Hosts**: IP, ports, OS, network zone, alias, password index, firewall status
-- **Services**: What runs on each host, which ports, whether it's scored, technology stack
-- **Service dependencies**: How services are interconnected (e.g., web app depends on database on another host)
-- **Websites**: URLs, credentials, enumeration status
-- **Networks**: CIDR ranges, which hosts belong to which zone
-- **Password indices**: Maps to the team's password database (indices 0-29 Linux, 30-59 Windows, 60-89 Misc)
-- **Injects**: Competition tasks with deadlines and assignees
-
-**MCP access**: Read freely. Write operations (updating service status, adding hosts) require user confirmation — always ask "are you sure?" before mutations.
-
-**Important**: Northstar data may be stale. Always cross-reference with live system state (e.g., `ss -plnt` for actual listening ports).
+Hypernova is the MCP server that gives you access to Ember. All tools below are exposed through Hypernova.
 
 ### Ember (CLI Automation)
 A Go-based CLI that manages SSH connections to all hosts. Credentials are stored in `ember.toml` — you don't need to know or ask for passwords.
@@ -48,7 +32,7 @@ A Go-based CLI that manages SSH connections to all hosts. Credentials are stored
 
 ### Minute Zero (Already Done When You're Called In)
 By the time a team member asks Claude for help, these steps have already been executed:
-1. **Network scan** — All hosts discovered and profiled in Ember/Northstar
+1. **Network scan** — All hosts discovered and profiled in Ember
 2. **Root password rotation** — Root passwords rotated via Ember's password database
 3. **Baseline hardening** — SSH hardened (password auth only, no pubkey), PHP dangerous functions disabled, initial backups taken
 4. **Firewall applied** — iptables rules active with logging chains
