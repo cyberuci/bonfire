@@ -1,6 +1,23 @@
+<#
+.SYNOPSIS
+    Hardens a Windows system by applying immediate security configurations, firewall rules, and Active Directory mitigations.
+
+.DESCRIPTION
+    This script is a comprehensive 'MinuteZero' hardening tool designed for rapid incident response or secure server commissioning. It performs high-impact security operations across multiple domains:
+    
+    1. Legacy Services: Disables SMBv1 and the Print Spooler service.
+    2. Active Directory (DC Only): Hardens Kerberos Pre-authentication, disables the Guest account, resets MachineAccountQuota, and applies Zerologon mitigations.
+    3. Networking: Implements a "Block Outbound / Allow Inbound" firewall policy with specific rules for RDP, ICMP, and trusted local subnets.
+    4. Endpoint Protection: Ensures Microsoft Defender is running, clears all existing exclusions, and enables 15+ Attack Surface Reduction (ASR) rules.
+    5. OS Hardening: Resets file permissions on sensitive binaries (cmd, powershell, regedit), enables strict UAC, and applies LSA/WDigest registry mitigations to prevent credential theft.
+    
+    Prerequisites: Must be run with Administrator privileges. Ensure local subnets and blocked ports are defined in the script variables before execution.
+#>
+
 # Local Subnets (X.X.X.0/24) (keep blank if none)
 $localSubnets = ""
 $force = $False
+$firewall = $True
 
 $blockedPorts = ""
 
@@ -70,9 +87,9 @@ catch {
 
 # DC Minute 0
 if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'") {
-    $outputFilePath = "C:\Users\Administrator\Documents\undo_deprivileges.txt"
+    $outputFilePath = "C:\Users\Administrator\Documents\privileges.txt"
     Add-Content -Path $outputFilePath -Value " "
-    Add-Content -Path $outputFilePath -Value "# Undo Deprivileges"
+    Add-Content -Path $outputFilePath -Value "# Privileges"
 
     $groups = @("Domain Admins", "Enterprise Admins", "Administrators", "DnsAdmins", "Group Policy Creator Owners", "Schema Admins", "Key Admins", "Enterprise Key Admins")
 
@@ -85,7 +102,6 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
 
         foreach ($member in $members) {
             try {
-                Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false
                 Write-Host "[$($hostname)] $($member.SamAccountName) in $group."
                 Write-Output "[$($hostname)] $($member.SamAccountName) in $group."
                 Add-Content -Path $outputFilePath -Value "Add-ADGroupMember -Identity '$($group)' -Members '$($member.SamAccountName)';"
@@ -140,74 +156,77 @@ if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType=
 }
 
 # Firewall
-netsh a s a state off 
-netsh a s a firewallpolicy "allowinbound,blockoutbound"
-netsh a f de r n=all 
+if ($firewall) {
+    netsh a s a state off 
+    netsh a s a firewallpolicy "allowinbound,blockoutbound"
+    netsh a f de r n=all 
 
-netsh a f a r n="RDP" dir=in a=allow prot=TCP localport=3389 
-netsh a f a r n="ICMP_In" dir=in a=allow prot=ICMPv4
-netsh a f a r n="ICMP_Out" dir=out a=allow prot=ICMPv4
+    netsh a f a r n="RDP" dir=in a=allow prot=TCP localport=3389 
+    netsh a f a r n="Internet_Out" dir=out a=allow prot=TCP remoteport=80,443
+    netsh a f a r n="ICMP_In" dir=in a=allow prot=ICMPv4
+    netsh a f a r n="ICMP_Out" dir=out a=allow prot=ICMPv4
 
-$subnetIndex = 1
-foreach ($subnet in $activeSubnets) {
-    netsh a f a r n="Local${subnetIndex}_TCP_In" dir=in a=allow prot=TCP remoteip=$subnet 
-    netsh a f a r n="Local${subnetIndex}_UDP_In" dir=in a=allow prot=UDP remoteip=$subnet 
-    netsh a f a r n="Local${subnetIndex}_TCP_Out" dir=out a=allow prot=TCP remoteip=$subnet 
-    netsh a f a r n="Local${subnetIndex}_UDP_Out" dir=out a=allow prot=UDP remoteip=$subnet 
-    Write-Host "[$($hostname)] Localsubnet${subnetIndex}: $($subnet)" -ForegroundColor Cyan
-    $subnetIndex++
-}
+    $subnetIndex = 1
+    foreach ($subnet in $activeSubnets) {
+        netsh a f a r n="Local${subnetIndex}_TCP_In" dir=in a=allow prot=TCP remoteip=$subnet 
+        netsh a f a r n="Local${subnetIndex}_UDP_In" dir=in a=allow prot=UDP remoteip=$subnet 
+        netsh a f a r n="Local${subnetIndex}_TCP_Out" dir=out a=allow prot=TCP remoteip=$subnet 
+        netsh a f a r n="Local${subnetIndex}_UDP_Out" dir=out a=allow prot=UDP remoteip=$subnet 
+        Write-Host "[$($hostname)] Localsubnet${subnetIndex}: $($subnet)" -ForegroundColor Cyan
+        $subnetIndex++
+    }
 
-# DC Firewall
-if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'") {
-    netsh a f a r n="DNS_Out" dir=out a=allow program="%SystemRoot%\System32\dns.exe"
-    netsh a f a r n="DNS_In" dir=in a=allow prot=UDP localport=53 
-}
+    # DC Firewall
+    if (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'") {
+        netsh a f a r n="DNS_Out" dir=out a=allow program="%SystemRoot%\System32\dns.exe"
+        netsh a f a r n="DNS_In" dir=in a=allow prot=UDP localport=53 
+    }
 
-# Initial Blocks
-$sortedSubnets = @($activeSubnets | Sort-Object { [version]($_ -replace '/\d+$', '') })
+    # Initial Blocks
+    $sortedSubnets = @($activeSubnets | Sort-Object { [version]($_ -replace '/\d+$', '') })
 
-$blockMsg = @()
+    $blockMsg = @()
 
-for ($i = 0; $i -lt $sortedSubnets.Count; $i++) {
-    $s = $sortedSubnets[$i].Split('.')
-    $prev = "$($s[0]).$($s[1]).$([int]$s[2] - 1).255"
-    $next = "$($s[0]).$($s[1]).$([int]$s[2] + 1).1"
+    for ($i = 0; $i -lt $sortedSubnets.Count; $i++) {
+        $s = $sortedSubnets[$i].Split('.')
+        $prev = "$($s[0]).$($s[1]).$([int]$s[2] - 1).255"
+        $next = "$($s[0]).$($s[1]).$([int]$s[2] + 1).1"
 
-    if ($i -eq 0) {
-        netsh a f a r n="Block_Below" dir=in a=block prot=TCP remoteip="0.0.0.0-$prev" localport=$blockedPorts > $null
-        $blockMsg += "(0.0.0.0 - $prev)"
-    } 
-    
-    if ($i -gt 0) {
-        $prev_s = $sortedSubnets[$i-1].Split('.')
-        $prev_next = "$($prev_s[0]).$($prev_s[1]).$([int]$prev_s[2] + 1).1"
+        if ($i -eq 0) {
+            netsh a f a r n="Block_Below" dir=in a=block prot=TCP remoteip="0.0.0.0-$prev" localport=$blockedPorts > $null
+            $blockMsg += "(0.0.0.0 - $prev)"
+        } 
         
-        netsh a f a r n="Block_Between_$i" dir=in a=block prot=TCP remoteip="$prev_next-$prev" localport=$blockedPorts > $null
-        $blockMsg += "($prev_next - $prev)"
+        if ($i -gt 0) {
+            $prev_s = $sortedSubnets[$i-1].Split('.')
+            $prev_next = "$($prev_s[0]).$($prev_s[1]).$([int]$prev_s[2] + 1).1"
+            
+            netsh a f a r n="Block_Between_$i" dir=in a=block prot=TCP remoteip="$prev_next-$prev" localport=$blockedPorts > $null
+            $blockMsg += "($prev_next - $prev)"
+        }
+
+        if ($i -eq ($sortedSubnets.Count - 1)) {
+            netsh a f a r n="Block_Above" dir=in a=block prot=TCP remoteip="$next-255.255.255.255" localport=$blockedPorts > $null
+            $blockMsg += "($next - 255.255.255.255)"
+        }
     }
 
-    if ($i -eq ($sortedSubnets.Count - 1)) {
-        netsh a f a r n="Block_Above" dir=in a=block prot=TCP remoteip="$next-255.255.255.255" localport=$blockedPorts > $null
-        $blockMsg += "($next - 255.255.255.255)"
-    }
+    Write-Host "[$($hostname)] Blocks: $($blockMsg -join ', ')" -ForegroundColor Cyan
+
+    # Logging
+    netsh a s a logging allowedconnections enable
+    netsh a s a logging droppedconnections enable
+    netsh a s a logging filename "%SystemRoot%\System32\LogFiles\Firewall\pfirewall.log"
+    netsh a s a logging maxfilesize 10000
+
+    netsh a s a state on 
 }
-
-Write-Host "[$($hostname)] Blocks: $($blockMsg -join ', ')" -ForegroundColor Cyan
-
-# Logging
-netsh a s a logging allowedconnections enable
-netsh a s a logging droppedconnections enable
-netsh a s a logging filename "%SystemRoot%\System32\LogFiles\Firewall\pfirewall.log"
-netsh a s a logging maxfilesize 10000
-
-netsh a s a state on 
 
 # Defender
 if (Get-Command -Name Get-MpPreference -ErrorAction SilentlyContinue) {
     try {
-        Start-Service -Name WinDefend -ErrorAction Stop
         Set-Service -Name WinDefend -StartupType Automatic -ErrorAction Stop
+        Start-Service -Name WinDefend -ErrorAction Stop
         Write-Host "[$($hostname)] Started Windows Defender" -ForegroundColor Green
     } catch {
         Write-Host "[$($hostname)] Failed to start Windows Defender: $_" -ForegroundColor Red

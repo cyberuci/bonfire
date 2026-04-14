@@ -1,3 +1,17 @@
+<#
+.SYNOPSIS
+    Temporarily modifies the Windows Firewall to download the latest Firefox installer and then restores original settings.
+
+.DESCRIPTION
+    This script automates the retrieval of the Firefox web browser in a restricted environment. 
+    It performs the following security and networking tasks:
+    1. Creates a temporary outbound firewall rule allowing TCP traffic on ports 80 and 443.
+    2. Ensures the Windows Firewall state is set to "On".
+    3. Configures the session to use TLS 1.2 for secure communication.
+    4. Downloads the 64-bit Firefox installer directly to the Administrator's Documents folder.
+    5. Deletes the temporary firewall rule immediately after the download completes to maintain a hardened security posture.
+#>
+
 netsh a f a r n=WEB_OUT dir=out a=allow prot=TCP remoteport="80,443"
 
 netsh a s a state on

@@ -1,3 +1,8 @@
+<#
+.SYNOPSIS
+    Downloads and extracts the Sysinternals Suite.
+#>
+
 $destinationPath = "C:\Users\Administrator\Documents\Sysinternals.zip"
 $extractedPath = "C:\Sysinternals"
 

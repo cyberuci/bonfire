@@ -1,3 +1,18 @@
+<#
+.SYNOPSIS
+    Automates bulk Active Directory password resets using randomly generated passphrases.
+
+.DESCRIPTION
+    This script performs automated password rotations for Active Directory users by 
+    generating secure, readable passphrases (formatted as three dictionary words joined 
+    by hyphens, with a random number appended). 
+    
+    It can target a specific list of users via a text file or process all users using 
+    the '-All' switch, while safely excluding critical built-in accounts like 'Administrator' 
+    and 'krbtgt'. Finally, it exports the new credentials to a local text file, 
+    providing both a flat list and a breakdown categorized by AD group membership.
+#>
+
 param(
     [string]$UserFile = ".\users.txt",
     [switch]$All

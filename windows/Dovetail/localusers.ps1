@@ -1,3 +1,22 @@
+<#
+.SYNOPSIS
+    Performs a bulk password rotation for local user accounts on non-Domain Controller systems.
+
+.DESCRIPTION
+    This script identifies if the local system is a Domain Controller; if it is not, it 
+    proceeds to rotate passwords for all enabled local user accounts. 
+
+    Key features include:
+    - Exclusion Logic: Specifically skips the 'Administrator' account, disabled accounts, 
+      and a predefined 'hacker1' account.
+    - Secure Generation: Uses a custom function to generate 10-character complex passwords 
+      containing uppercase, lowercase, numbers, and special characters.
+    - Logging: Records the new credentials in a CSV-formatted text file located in the 
+      Administrator's Documents folder.
+    - Safety Check: Automatically terminates if the system is identified as a Primary 
+      or Backup Domain Controller to prevent unintended impact on domain accounts.
+#>
+
 $domainRole = (Get-WmiObject Win32_ComputerSystem).DomainRole
 if (!($domainRole -eq 4 -or $domainRole -eq 5)) {
     $hostname = $env:computername

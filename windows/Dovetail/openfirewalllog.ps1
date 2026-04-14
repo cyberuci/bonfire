@@ -1,3 +1,14 @@
+<#
+.SYNOPSIS
+    Reads and displays the Windows Firewall log file for quick traffic analysis.
+
+.DESCRIPTION
+    This script provides an efficient way to review firewall activity recorded in 'pfirewall.log'. 
+    By default, it outputs the last 100 lines of the log directly to the console for a rapid 
+    security snapshot. If the '-All' switch is used, the script opens the entire log file in 
+    Notepad to allow for comprehensive manual searching and deeper forensic investigation.
+#>
+
 param(
     [switch]$All
 )

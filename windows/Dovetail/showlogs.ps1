@@ -1,3 +1,21 @@
+<#
+.SYNOPSIS
+    Retrieves and displays recent Windows login and Kerberos/NTLM authentication activity.
+
+.DESCRIPTION
+    This script audits the Windows Security event log to provide a snapshot of recent 
+    authentication attempts. It performs two main functions:
+    1. Logon Auditing: Retrieves the last 10 successful (ID 4624) and failed (ID 4625) 
+       logon events. It filters for human-relevant logon types (Interactive, Network, RDP) 
+       and excludes noisy system or computer accounts.
+    2. Authentication Auditing: Retrieves the last 10 successful and failed Kerberos 
+       (TGT/Service Ticket) and NTLM authentication events (IDs 4768, 4769, 4771, 4776).
+    
+    The script parses XML event data to provide readable output and translates complex 
+    hexadecimal status codes into human-readable failure reasons. Results are color-coded 
+    (Green for Success, Red for Failure) to facilitate rapid visual security auditing.
+#>
+
 Write-Host "`nLast 10 Successful and Failed Logins:" -ForegroundColor Cyan
 
 $allLogins = @()

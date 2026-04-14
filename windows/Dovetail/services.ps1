@@ -1,3 +1,16 @@
+<#
+.SYNOPSIS
+    Hardens SSH, IIS, and PHP services by applying security configurations and removing vulnerable modules.
+
+.DESCRIPTION
+    This script performs targeted security hardening for Windows-based web and remote access services. 
+    Specifically, it:
+    - Modifies the SSH configuration to enforce password authentication and disable public key authentication.
+    - Hardens IIS by removing the WebDAV module, resetting web root permissions, and auditing Application Pool identities.
+    - Recursively locates 'php.ini' files to append strict security directives, such as disabling dangerous functions (exec, system, etc.), turning off file uploads, and minimizing execution timeouts.
+    - Restarts relevant services (SSHD, IIS, and XAMPP) to ensure all configuration changes take effect.
+#>
+
 $force = $False
 $hostname = $env:computername
 

@@ -1,32 +1,14 @@
 <#
 .SYNOPSIS
-Enables Extended Protection for Authentication (EPA) on Windows for security hardening.
+    Hardens Active Directory Certificate Services (AD CS) and enforces stronger authentication protocols.
+
 .DESCRIPTION
-  Configures Windows Extended Protection for Authentication by setting required registry values.
-  This enhances protection against authentication relay and "man in the middle" attacks by
-  binding authentication requests to Service Principal Names (SPNs) and TLS channels.
-  REQUIREMENTS:
-    - PowerShell: 5.1+ or 7.x
-    - OS: Windows 10/11, Windows Server 2016+
-    - Modules: Microsoft.PowerShell.Management (built-in)
-  WARNINGS:
-    - Requires admin privileges; modifies security-critical registry settings.
-    - System restart required after configuration changes.
-    - May impact applications not compatible with EPA or NTLMv2.
-.EXECUTION
-  Run in an elevated PowerShell console.
-.NOTES
-  VERSION: 1.0
-  CHANGELOG:
-    - 1.0 (2025-9-15): Initial release.
-  DISCLAIMER:
-    VICARIUS STRONGLY RECOMMENDS RUNNING THIS SCRIPT IN A TEST LAB ENVIRONMENT
-    BEFORE DEPLOYING THEM TO PRODUCTION. USE AT YOUR OWN DISCRETION ONLY AFTER
-    CAREFULLY ANALYZING THE CODE.
-.AUTHOR
-This script has been made by Vicarius Research Team
-.VERSION
-1.0
+    This script applies several critical security configurations to Active Directory Certificate Services 
+    (AD CS) and domain authentication mechanisms to mitigate common privilege escalation and relay attacks. 
+        
+    Prerequisites: Must be run with Administrator privileges on a machine with Active Directory and 
+    Certificate Services administration capabilities. A system restart is required for some registry 
+    changes to take effect.
 #>
 
 # ==========================================
@@ -48,51 +30,6 @@ function Write-Status {
     }
     Write-Host "$tag $Message"
 }
-
-Write-Status "Require Cert Approval" "Info"
-Write-Status "----------------------------------------------------" "Info"
-
-# Get AD config path
-$root = Get-ADRootDSE
-$configNC = $root.configurationNamingContext
-
-# Path to certificate templates container
-$templatesPath = "CN=Certificate Templates,CN=Public Key Services,CN=Services,$configNC"
-
-# Load all template objects
-$templates = Get-ADObject -SearchBase $templatesPath -Filter * -Properties msPKI-Enrollment-Flag
-
-$PEND_FLAG = 2
-
-foreach ($tpl in $templates) {
-    try {
-        $tplName = $tpl.Name
-        $currentFlag = [int]$tpl.'msPKI-Enrollment-Flag'
-
-        Write-Host "Processing template: $tplName" -ForegroundColor Yellow
-        Write-Host "  Current Flags: $currentFlag"
-
-        # Bind ADSI object
-        $tplADSI = [ADSI]"LDAP://$($tpl.DistinguishedName)"
-
-        # Add the pending flag (2nd line UNDOS)
-        $newFlags = $currentFlag -bor $PEND_FLAG # TO HARDEN
-        # $newFlags = ($currentFlag -band (-bnot $PEND_FLAG)) # TO UNDO
-
-
-        $tplADSI.'msPKI-Enrollment-Flag' = $newFlags
-        $tplADSI.SetInfo()
-
-        Write-Host "  Updated Flags: $newFlags" -ForegroundColor Green
-        Write-Host "  CA certificate manager approval ENABLED"
-    }
-    catch {
-        Write-Host "  ERROR modifying template $tplName : $_" -ForegroundColor Red
-    }
-}
-
-Write-Host "`nAll templates processed." -ForegroundColor Cyan
-
 
 Write-Status "Enable Extended Protection for Authentication (EPA)" "Info"
 Write-Status "----------------------------------------------------" "Info"
@@ -178,7 +115,7 @@ try {
 Write-Status "Extended Protection for Authentication configuration completed." "Info"
 Write-Status "System restart required for changes to take effect." "Warning"
 
-Write-Host "`nModifying AttributeSubjectAltName" -ForegroundColor Cyan
+Write-Host "`nModifying AttributeSubjectAltName (Safe for existing certs)" -ForegroundColor Cyan
 try {
     certutil -setreg policy\EditFlags -EDITF_ATTRIBUTESUBJECTALTNAME2
     net stop certsvc; net start certsvc
@@ -187,10 +124,10 @@ try {
     Write-Host "Failed to modify Certificate Services: $_" -ForegroundColor Red
 }
 
-Write-Host "`nSetting CertificateMappingMethods" -ForegroundColor Cyan
+Write-Host "`nSetting CertificateMappingMethods (Compatibility Mode)" -ForegroundColor Cyan
 $regPath = "HKLM:\System\CurrentControlSet\Control\SecurityProviders\Schannel"
 $regName = "CertificateMappingMethods"
-$newValue = 0x0018   # decimal 24
+$newValue = 0x001F   # decimal 31 (Default, allows UPN to keep existing certs working)
 
 # Ensure key exists (New-Item -Force does not overwrite existing keys)
 if (-not (Test-Path $regPath)) {
@@ -215,10 +152,10 @@ try {
 }
 
 
-Write-Host "`nSetting StrongCertificateBindingEnforcement" -ForegroundColor Cyan
+Write-Host "`nSetting StrongCertificateBindingEnforcement (Audit Mode)" -ForegroundColor Cyan
 $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Kdc"
 $regName = "StrongCertificateBindingEnforcement"
-$newValue = 2   # DWORD
+$newValue = 1   # DWORD (1 = Audit/Compatibility. 2 would break existing certs)
 
 # Ensure key exists
 if (-not (Test-Path $regPath)) {
@@ -241,4 +178,3 @@ try {
 } catch {
     Write-Host "Failed to set ${regName}: $_" -ForegroundColor Red
 }
-
